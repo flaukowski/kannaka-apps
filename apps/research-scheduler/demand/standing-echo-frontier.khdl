@@ -8,9 +8,12 @@
 #   0.88 → RESOLVED 2026-08-07 by CRY-015518 (persistence 0.887, noise
 #          tolerance 1.000 — a perfect-tolerance record row; order
 #          rs-msj5mz38-0, fell within the first deep 6x30 series).
-#   0.90 → current target. Deliberately a stretch (+0.013 over the
-#          record, larger than a typical deep-series gain of ~+0.010) —
-#          a wall that HOLDS is honest research state, not failure.
+#   0.90 → RESOLVED 2026-08-07 by CRY-016438 (persistence 0.910, noise
+#          tolerance 0.998; order rs-msj5zv2n-0, first deep 6x45 series).
+#          Deeper budgets yield bigger jumps: 30 gens ≈ +0.010, 45 gens
+#          ≈ +0.023.
+#   0.925 → current target (deep 6x60 series). The ratchet continues
+#          until a full series HOLDS — that wall is the finding.
 #
 # This is the KCB-1 research direction (close the delayed-identity gap =
 # longer-lived structure) expressed as scheduler demand. Noise-tolerance
@@ -19,7 +22,7 @@
 # worker: depth beats breadth here (KHDL_WORK_GENERATIONS=30).
 
 cell FrontierEcho() {
-    when always => base crystal.primitive "Standing Echo" min_persistence 0.90
+    when always => base crystal.primitive "Standing Echo" min_persistence 0.925
 }
 
 grow FrontierEcho()
