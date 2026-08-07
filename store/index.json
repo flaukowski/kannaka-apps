@@ -2,6 +2,15 @@
   "schema": "kannaka-apps-index-v1",
   "apps": [
     {
+      "name": "crystal-worker",
+      "version": "0.1.0",
+      "description": "Consume standing crystal work orders — bounded evolve shifts toward each order's class and floors",
+      "kind": "work",
+      "path": "apps/crystal-worker",
+      "source": "store",
+      "variants": []
+    },
+    {
       "name": "preflight",
       "version": "0.1.0",
       "description": "Memory integrity gate — run before any one-way HRM operation",

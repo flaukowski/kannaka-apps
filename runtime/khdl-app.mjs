@@ -473,6 +473,144 @@ function runSchedule(appDir, manifest, dryRun) {
   return 0;
 }
 
+// --- work mode (crystal-worker: the supply side of ADR-0002) ---------------
+//
+// Consumes the scheduler's order book. One run = one bounded "shift" of
+// kannaka-crystal evolve attempts per open order. Only RUNS the crystal CLI —
+// never edits crystal source; registration happens through evolve's own path.
+
+const WORKER_MATERIALS = [
+  "ideal_resonator", "metamaterial", "europium_crystal",
+  "diamond_nv", "optical_cavity", "silicon",
+];
+
+// hdl-compatible class match: "Memory Seed" ≡ "MemorySeed".
+function normClass(c) {
+  return String(c || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function crystalRegistryPath() {
+  const dir = process.env.KANNAKA_CRYSTAL_DATA_DIR ||
+    join(homedir(), ".kannaka-crystal");
+  return join(dir, "registry.json");
+}
+
+function qualifyingRows(order) {
+  let rows;
+  try {
+    const j = JSON.parse(readFileSync(crystalRegistryPath(), "utf8"));
+    rows = j.primitives || j;
+  } catch {
+    return [];
+  }
+  const want = normClass(order.class);
+  const c = order.constraints || {};
+  return rows.filter((p) =>
+    normClass(p.class) === want &&
+    (p.persistence || 0) >= (c.min_persistence || 0) &&
+    (p.noise_tolerance || 0) >= (c.min_noise_tolerance || 0)
+  );
+}
+
+function runWork(appDir, manifest, dryRun) {
+  const crystal = process.env.KANNAKA_CRYSTAL_BIN || "kannaka-crystal";
+  const attempts = manifest.run.attempts ?? 8;
+  const generations = manifest.run.generations ?? 10;
+  const population = manifest.run.population ?? 12;
+
+  let state;
+  try {
+    state = JSON.parse(readFileSync(statePath(), "utf8"));
+  } catch (e) {
+    die(`no order book at ${statePath()} — run research-scheduler first (${e.message})`);
+  }
+  const open = (state.orders || []).filter(
+    (o) => !o.fulfilled_at && o.order_type === "crystal_work_order"
+  );
+  if (open.length === 0) {
+    console.error("crystal-worker: no open orders — nothing to do");
+    return 0;
+  }
+  console.error(`crystal-worker: ${open.length} open order(s), shift budget ${attempts} attempt(s) each`);
+
+  // Evolve registers into ONE shared registry, so attempts are global —
+  // running the same strategy once per order would be pure waste. Each
+  // evolve runs once; every open order is checked against the registry
+  // after it. state.shift_attempts persists across shifts so a strategy
+  // (material × robust × seed) is never repeated.
+  const stillOpen = () => open.filter((o) => !o.fulfilled_at);
+  const stamp = (order, row, note) => {
+    order.fulfilled_at = new Date().toISOString();
+    order.fulfilled_by = row.id;
+    if (note) order.fulfilled_note = note;
+    console.error(
+      `  ${order.order_id}: FULFILLED by ${row.id} (persistence ${(row.persistence || 0).toFixed(3)}, ` +
+      `noise_tol ${(row.noise_tolerance || 0).toFixed(3)})${note ? ` — ${note}` : ""}`
+    );
+    log(`work ${order.order_id} FULFILLED by ${row.id}`);
+  };
+
+  // Out-of-band supply (another node's evolve, a manual run) may already
+  // satisfy an order — check before spending compute.
+  for (const order of open) {
+    const rows = qualifyingRows(order);
+    if (rows.length > 0) stamp(order, rows[0], "satisfied before shift (out-of-band supply)");
+  }
+
+  state.shift_attempts = state.shift_attempts || 0;
+  state.shift_log = state.shift_log || [];
+  for (let i = 0; i < attempts && stillOpen().length > 0; i++) {
+    const n = state.shift_attempts;
+    const material = WORKER_MATERIALS[n % WORKER_MATERIALS.length];
+    const robust = n % 2 === 0;
+    const seed = 1000 + n;
+    const args = [
+      "evolve", "--material", material,
+      "--generations", String(generations),
+      "--population", String(population),
+      "--seed", String(seed),
+      ...(robust ? ["--robust"] : []),
+    ];
+    console.error(
+      `  attempt ${n + 1}: ${material} seed=${seed}${robust ? " robust" : ""} ` +
+      `(${stillOpen().length} order(s) open)`
+    );
+    if (dryRun) { state.shift_attempts++; continue; }
+
+    const r = runCapture(crystal, args);
+    const discovered = (r.stdout + r.stderr).match(/(\d+) new primitives/);
+    state.shift_attempts++;
+    state.shift_log.push({
+      n: state.shift_attempts, material, seed, robust,
+      exit: r.code,
+      new_primitives: discovered ? Number(discovered[1]) : null,
+      at: new Date().toISOString(),
+    });
+    if (r.code !== 0) {
+      console.error(`    evolve failed (exit ${r.code}) — continuing shift`);
+      log(`work shift attempt ${state.shift_attempts} evolve exit=${r.code}`);
+      continue;
+    }
+    for (const order of stillOpen()) {
+      const hits = qualifyingRows(order);
+      if (hits.length > 0) {
+        stamp(order, hits.sort((a, b) => (b.persistence || 0) - (a.persistence || 0))[0]);
+      }
+    }
+  }
+  for (const order of stillOpen()) {
+    console.error(`  ${order.order_id}: still open (shift attempts to date: ${state.shift_attempts}) — order stands`);
+  }
+  // dry-run mutates state in memory only — nothing below persists it.
+
+  if (!dryRun) {
+    writeFileSync(statePath(), JSON.stringify(state, null, 2) + "\n");
+  }
+  const fulfilled = open.filter((o) => o.fulfilled_at).length;
+  console.error(`crystal-worker: shift complete — ${fulfilled}/${open.length} order(s) fulfilled`);
+  return 0;
+}
+
 function runApp(appDir, opts) {
   const manifest = loadManifest(appDir);
   const mode = manifest.run.mode;
@@ -491,7 +629,10 @@ function runApp(appDir, opts) {
   if (mode === "schedule") {
     return runSchedule(appDir, manifest, opts.dryRun);
   }
-  die(`unknown [run] mode "${mode}" (gate | provision | schedule)`);
+  if (mode === "work") {
+    return runWork(appDir, manifest, opts.dryRun);
+  }
+  die(`unknown [run] mode "${mode}" (gate | provision | schedule | work)`);
 }
 
 function listStore(root) {

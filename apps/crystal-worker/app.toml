@@ -1,0 +1,14 @@
+[app]
+name = "crystal-worker"
+version = "0.1.0"
+description = "Consume standing crystal work orders — bounded evolve shifts toward each order's class and floors"
+kind = "work"
+
+[run]
+mode = "work"
+attempts = 8
+generations = 10
+population = 12
+# materials are cycled per attempt; robust mode alternates. Seeds derive
+# from the order's persistent attempt counter, so successive shifts never
+# repeat a strategy.
