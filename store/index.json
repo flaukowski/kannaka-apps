@@ -18,6 +18,15 @@
       "path": "apps/provisioner",
       "source": "store",
       "variants": []
+    },
+    {
+      "name": "research-scheduler",
+      "version": "0.1.0",
+      "description": "Close the hdl §14 loop — rank unresolved capability demand, enqueue crystal work orders, attribute resolutions",
+      "kind": "schedule",
+      "path": "apps/research-scheduler",
+      "source": "store",
+      "variants": []
     }
   ]
 }

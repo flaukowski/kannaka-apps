@@ -1,8 +1,31 @@
-# ADR-0002: Research Scheduler (design only)
+# ADR-0002: Research Scheduler
 
-- Status: Proposed
+- Status: Accepted (implemented 2026-08-06, Nick's direction: "continue with
+  full ADR-0002")
 - Date: 2026-08-06
-- Deciders: Nick Flach (pending), Kannaka session
+- Deciders: Nick Flach, Kannaka session
+
+## Implementation notes (v1 deltas from the proposal below)
+
+Shipped as `apps/research-scheduler` + `mode = "schedule"` in the runner.
+
+- **Sweep source**: store apps' programs + the scheduler's own
+  `demand/*.khdl`, NOT registered composites — `composites.json` stores
+  sealed plan metadata without the source program, so a composite can't be
+  re-grown to harvest fresh requests. Composite sweep returns when hdl
+  persists sources (or accepts plan re-resolution) — tracked as future work.
+- **Expect-gated programs**: hdl refuses to emit a plan while expects fail,
+  so their demand is harvested from unresolved-component warnings instead
+  (marked `degraded`, domain `unknown`).
+- **Memory-domain demand is never ordered**: dark anchors are recall supply
+  (provisioner territory); a crystal work order for them would be a
+  category error. They still appear in the backlog report.
+- **One standing order per request key** (`domain|class`); attribution =
+  every requesting program + plan hash. State in
+  `~/.kannaka/research-scheduler.json`.
+- All four acceptance criteria from the sketch below hold; #2's "flip
+  attributed to request id" is the `RESOLVED <key> (attributed to order
+  <id>)` log line on the pass after supply lands.
 
 ## Context
 

@@ -1,0 +1,10 @@
+[app]
+name = "research-scheduler"
+version = "0.1.0"
+description = "Close the hdl §14 loop — rank unresolved capability demand, enqueue crystal work orders, attribute resolutions"
+kind = "schedule"
+
+[run]
+mode = "schedule"
+max_orders = 3
+demand_dir = "demand"

@@ -1,0 +1,15 @@
+# Standing demand: a four-seed bank over the rarest crystal class.
+#
+# Memory Seed primitives (rel_area < 0.01 AND stability > 3) do not exist
+# in the live registry — kannaka-hdl's membank demo resolves unresolved BY
+# DESIGN. This program turns that known gap into scheduled demand: every
+# scheduler pass harvests its discovery request and keeps a crystal work
+# order standing until the swarm grows one. No expects — demand programs
+# must emit even while unresolved (ADR-0001 §4 logic applies here too).
+
+cell SeedBank(n) {
+    when n > 1  => split SeedBank(n / 2), SeedBank(n / 2)
+    when always => base crystal.primitive "Memory Seed" min_noise_tolerance 0.5 strategy diverse
+}
+
+grow SeedBank(4)

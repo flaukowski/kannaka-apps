@@ -13,7 +13,7 @@
 // nonzero = the verdict, propagated from kannaka-hdl where applicable.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, appendFileSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
@@ -226,6 +226,217 @@ function runProvision(appDir, manifest, variant, dryRun) {
   return verdict;
 }
 
+// --- schedule mode (ADR-0002: research scheduler) -------------------------
+//
+// Closes the kannaka-hdl §14 loop: sweep the store's programs for unresolved
+// queries (capability demand), rank by how many programs each blocks, emit
+// crystal work orders onto the swarm queue, and attribute resolved flips to
+// the order that requested them. The scheduler only ENQUEUES — crystal work
+// executes in the crystal lane, never here.
+
+function statePath() {
+  return process.env.KHDL_SCHEDULER_STATE ||
+    join(homedir(), ".kannaka", "research-scheduler.json");
+}
+
+function sweepPrograms(storeRoot, appDir, manifest) {
+  const programs = [];
+  const appsDir = join(storeRoot, "apps");
+  for (const name of readdirSync(appsDir)) {
+    let m;
+    try {
+      m = parseToml(readFileSync(join(appsDir, name, "app.toml"), "utf8"));
+    } catch {
+      continue;
+    }
+    for (const key of ["entry", "gate", "seed"]) {
+      if (m.run?.[key]) {
+        programs.push({ app: name, file: join(appsDir, name, m.run[key]) });
+      }
+    }
+    for (const rel of Object.values(m.variants || {})) {
+      programs.push({ app: name, file: join(appsDir, name, rel) });
+    }
+  }
+  const demandRel = manifest.run.demand_dir || "demand";
+  const demandDir = join(appDir, demandRel);
+  try {
+    for (const f of readdirSync(demandDir)) {
+      if (f.endsWith(".khdl")) {
+        programs.push({ app: `${manifest.app.name}/${demandRel}`, file: join(demandDir, f) });
+      }
+    }
+  } catch {
+    // no demand dir — sweep is just the store apps
+  }
+  // A program may be referenced twice (e.g. preflight default = a variant);
+  // dedupe by absolute path.
+  const seen = new Set();
+  return programs.filter((p) => !seen.has(p.file) && seen.add(p.file));
+}
+
+function harvestDemand(program) {
+  const out = scratchFile(`sweep-${program.app.replace(/[\\/]/g, "_")}.json`);
+  const r = runCapture(HDL, [
+    "grow", program.file,
+    "--memory-provider", KAN,
+    "--unresolved", "speculative",
+    "--emit", "json",
+    "--out", out,
+  ]);
+  const requests = [];
+  if (r.code === 0) {
+    try {
+      const plan = JSON.parse(readFileSync(out, "utf8"));
+      for (const req of plan.discovery_requests || []) {
+        requests.push({
+          domain: req.domain,
+          class: req.class,
+          component_type: req.component_type,
+          constraints: req.constraints,
+          plan_hash: plan.plan_hash,
+        });
+      }
+    } catch (e) {
+      log(`schedule: unparseable plan for ${program.file}: ${e.message}`);
+    }
+  } else {
+    // Expect-gated programs refuse to emit while failing ("nothing emitted"),
+    // but their unresolved anchors ARE demand — harvest from the warnings.
+    const warn = /warning: (\w+): no component \(class "(.+?)", min_persistence ([0-9.eE+-]+), min_noise_tolerance ([0-9.eE+-]+)/g;
+    for (const m of r.stderr.matchAll(warn)) {
+      requests.push({
+        domain: "unknown",
+        class: m[2],
+        component_type: null,
+        constraints: { min_persistence: Number(m[3]), min_noise_tolerance: Number(m[4]), material: null },
+        plan_hash: null,
+        degraded: true,
+      });
+    }
+  }
+  rmSync(out, { force: true });
+  return { grewClean: r.code === 0, requests };
+}
+
+function runSchedule(appDir, manifest, dryRun) {
+  const storeRoot = resolve(join(appDir, "..", ".."));
+  const maxOrders = manifest.run.max_orders ?? 3;
+  const programs = sweepPrograms(storeRoot, appDir, manifest);
+  console.error(`research-scheduler: sweeping ${programs.length} program(s)`);
+
+  // 1-2. Collect demand across every program.
+  const backlog = new Map(); // key = domain|class
+  const cleanPrograms = new Set();
+  for (const p of programs) {
+    const { grewClean, requests } = harvestDemand(p);
+    if (grewClean) cleanPrograms.add(p.app + ":" + p.file);
+    for (const req of requests) {
+      const key = `${req.domain}|${req.class}`;
+      const entry = backlog.get(key) || {
+        key, domain: req.domain, class: req.class,
+        component_type: req.component_type,
+        constraints: { min_persistence: 0, min_noise_tolerance: 0, material: null },
+        requesters: [],
+      };
+      entry.requesters.push({ app: p.app, file: p.file, plan_hash: req.plan_hash });
+      entry.constraints.min_persistence = Math.max(entry.constraints.min_persistence, req.constraints.min_persistence || 0);
+      entry.constraints.min_noise_tolerance = Math.max(entry.constraints.min_noise_tolerance, req.constraints.min_noise_tolerance || 0);
+      entry.constraints.material = entry.constraints.material || req.constraints.material;
+      backlog.set(key, entry);
+    }
+  }
+
+  // 3. Rank: blocked-plan count first, floor stringency as tiebreak.
+  const ranked = [...backlog.values()].sort((a, b) =>
+    b.requesters.length - a.requesters.length ||
+    (b.constraints.min_persistence + b.constraints.min_noise_tolerance) -
+    (a.constraints.min_persistence + a.constraints.min_noise_tolerance)
+  );
+
+  // 4. State: attribution across runs.
+  let state = { requests: {}, orders: [] };
+  try {
+    state = JSON.parse(readFileSync(statePath(), "utf8"));
+  } catch {
+    // first run
+  }
+  const now = new Date().toISOString();
+
+  // 5. Flips: previously-demanded, now absent from the backlog → resolved.
+  for (const [key, rec] of Object.entries(state.requests)) {
+    if (!backlog.has(key) && !rec.resolved_at) {
+      rec.resolved_at = now;
+      const via = rec.order_id ? ` (attributed to order ${rec.order_id})` : " (no order issued)";
+      console.error(`research-scheduler: RESOLVED ${key}${via}`);
+      log(`schedule RESOLVED ${key}${via}`);
+    }
+  }
+  for (const entry of ranked) {
+    const rec = state.requests[entry.key] || { first_seen: now };
+    rec.last_seen = now;
+    rec.blocked_plans = entry.requesters.length;
+    delete rec.resolved_at; // demand is back (or still) live
+    state.requests[entry.key] = rec;
+  }
+
+  // 6. Orders for the top of the backlog. Memory-domain demand is recall
+  // supply (provisioner territory), not crystal-growable — skip it here.
+  const orderable = ranked.filter((e) => e.domain !== "memory");
+  let issued = 0;
+  for (const entry of orderable.slice(0, maxOrders)) {
+    const rec = state.requests[entry.key];
+    if (rec.order_id) continue; // one standing order per request
+    const orderId = `rs-${Date.now().toString(36)}-${issued}`;
+    const order = {
+      order_type: "crystal_work_order",
+      order_id: orderId,
+      domain: entry.domain,
+      class: entry.class,
+      component_type: entry.component_type,
+      constraints: entry.constraints,
+      blocked_plans: entry.requesters.length,
+      attributions: entry.requesters.map((r) => `${r.app}:${r.plan_hash ?? "unsealed"}`),
+      suggested_procedure:
+        "kannaka-crystal evolve toward this class, then promote --procedure replicate; " +
+        "behavior contracts (promote --procedure behavior) once L2",
+      issued_at: now,
+      issued_by: "kannaka-apps/research-scheduler",
+    };
+    console.error(`research-scheduler: order ${orderId} → ${entry.domain}.${entry.class} (blocks ${entry.requesters.length} plan(s))`);
+    if (!dryRun) {
+      const r = runCapture(KAN, ["swarm", "enqueue", "crystal_work_order", JSON.stringify(order)]);
+      if (r.code !== 0) {
+        console.error(`  enqueue failed (exit ${r.code}) — order recorded locally only`);
+        log(`schedule enqueue FAILED ${orderId} exit=${r.code}`);
+        order.enqueued = false;
+      } else {
+        order.enqueued = true;
+      }
+    } else {
+      order.enqueued = false;
+      order.dry_run = true;
+    }
+    rec.order_id = orderId;
+    state.orders.push(order);
+    issued++;
+  }
+
+  // 7. Report + persist.
+  console.error(
+    `research-scheduler: backlog ${ranked.length} (memory-domain ${ranked.length - orderable.length}), ` +
+    `orders issued ${issued}, programs clean ${cleanPrograms.size}/${programs.length}`
+  );
+  for (const e of ranked) {
+    console.error(`  ${String(e.requesters.length).padStart(2)}x ${e.domain}.${e.class}`);
+  }
+  if (!dryRun) {
+    mkdirSync(join(homedir(), ".kannaka"), { recursive: true });
+    writeFileSync(statePath(), JSON.stringify(state, null, 2) + "\n");
+  }
+  return 0;
+}
+
 function runApp(appDir, opts) {
   const manifest = loadManifest(appDir);
   const mode = manifest.run.mode;
@@ -241,7 +452,10 @@ function runApp(appDir, opts) {
   if (mode === "provision") {
     return runProvision(appDir, manifest, opts.variant, opts.dryRun);
   }
-  die(`unknown [run] mode "${mode}" (gate | provision)`);
+  if (mode === "schedule") {
+    return runSchedule(appDir, manifest, opts.dryRun);
+  }
+  die(`unknown [run] mode "${mode}" (gate | provision | schedule)`);
 }
 
 function listStore(root) {
