@@ -557,11 +557,42 @@ function runWork(appDir, manifest, dryRun) {
     if (rows.length > 0) stamp(order, rows[0], "satisfied before shift (out-of-band supply)");
   }
 
+  // Data-driven material bias: the registry's own record-holders say which
+  // material produces the metric an order is starved for. For each open
+  // order, find the material of the best same-class rows; odd attempts use
+  // that material, even attempts keep the exploration rotation. (Measured
+  // 2026-08-07: the top five Standing Echo persistence rows are ALL
+  // metamaterial, but a flat rotation gives it 1-2 attempts in 8.)
+  const biasFor = (order) => {
+    let rows;
+    try {
+      const j = JSON.parse(readFileSync(crystalRegistryPath(), "utf8"));
+      rows = (j.primitives || j).filter((p) => normClass(p.class) === normClass(order.class));
+    } catch {
+      return null;
+    }
+    if (rows.length === 0) return null;
+    const metric = (order.constraints?.min_persistence || 0) >= (order.constraints?.min_noise_tolerance || 0)
+      ? "persistence" : "noise_tolerance";
+    const byMat = {};
+    for (const p of rows.sort((a, b) => (b[metric] || 0) - (a[metric] || 0)).slice(0, 10)) {
+      const m = p.material || p.material_id;
+      if (m) byMat[m] = (byMat[m] || 0) + 1;
+    }
+    const top = Object.entries(byMat).sort((a, b) => b[1] - a[1])[0];
+    return top ? top[0] : null;
+  };
+  const biases = [...new Set(stillOpen().map(biasFor).filter(Boolean))];
+  if (biases.length) console.error(`  registry bias: record-holders favour ${biases.join(", ")}`);
+
   state.shift_attempts = state.shift_attempts || 0;
   state.shift_log = state.shift_log || [];
   for (let i = 0; i < attempts && stillOpen().length > 0; i++) {
     const n = state.shift_attempts;
-    const material = WORKER_MATERIALS[n % WORKER_MATERIALS.length];
+    const rotation = WORKER_MATERIALS[n % WORKER_MATERIALS.length];
+    const material = (n % 2 === 1 && biases.length)
+      ? biases[Math.floor(n / 2) % biases.length]
+      : rotation;
     const robust = n % 2 === 0;
     const seed = 1000 + n;
     const args = [

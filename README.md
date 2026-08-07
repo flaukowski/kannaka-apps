@@ -28,7 +28,8 @@ node runtime/khdl-app.mjs run apps/provisioner --dry-run
 | --- | --- | --- |
 | [preflight](apps/preflight/) | gate | Memory integrity gate — the fleet-proven anchor set; run before any one-way HRM operation |
 | [provisioner](apps/provisioner/) | provision | Genesis: seed a node's required memory architecture (dark anchors only), then prove it by gate |
-| [research-scheduler](apps/research-scheduler/) | schedule | Close the §14 loop: rank unresolved capability demand, enqueue crystal work orders, attribute resolutions ([ADR-0002](docs/adr/0002-research-scheduler.md)) |
+| [research-scheduler](apps/research-scheduler/) | schedule | Demand side of the §14 loop: rank unresolved capability demand, record + announce crystal work orders, attribute resolutions ([ADR-0002](docs/adr/0002-research-scheduler.md)) |
+| [crystal-worker](apps/crystal-worker/) | work | Supply side: consume the order book with bounded `kannaka-crystal evolve` shifts; fulfil orders when the registry gains a qualifying primitive |
 
 ## Why this shape
 

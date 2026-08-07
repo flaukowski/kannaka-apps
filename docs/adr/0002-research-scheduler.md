@@ -26,6 +26,16 @@ Shipped as `apps/research-scheduler` + `mode = "schedule"` in the runner.
 - All four acceptance criteria from the sketch below hold; #2's "flip
   attributed to request id" is the `RESOLVED <key> (attributed to order
   <id>)` log line on the pass after supply lands.
+- **Supply side shipped same day** (`apps/crystal-worker`, mode `work`),
+  amending "walk one round by hand first": the worker consumes the ORDER
+  BOOK (scheduler state), not the NATS subject — core NATS does not
+  persist an order published while no worker listens, so the state file
+  is the durable record and the announce is transport. Each shift runs
+  bounded `kannaka-crystal evolve` attempts (strategy grid over material
+  × robust × seed, never repeated across shifts) and checks EVERY open
+  order after each evolve, since registration lands in one shared
+  registry. The worker only runs the crystal CLI — the crystal-lane
+  boundary (no source edits) is kept.
 
 ## Context
 
