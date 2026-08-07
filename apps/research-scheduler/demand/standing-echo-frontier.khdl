@@ -19,8 +19,18 @@
 #          population to 24 at 45g bought +0.050 in two attempts.
 #          Lesson: when one budget axis saturates, probe the others
 #          before declaring a wall.
-#   0.97  → current target (population-scaling series; persistence is
-#          bounded [0,1] — expect diminishing steps near the ceiling).
+#   0.97  → STANDING — the measured evolutionary ceiling (2026-08-07).
+#          Unlike the refuted "0.91 wall", this one was measured across
+#          the FULL CLI-reachable strategy space: generations 30/45/60
+#          (saturates +0.002), population 12/24/48 (48 did not even
+#          reproduce 24's best), their interaction (60g x pop48: no
+#          gain), all 8 materials, robust on/off. Best = CRY-017764 at
+#          0.9604 (metamaterial, 45g, pop24). Campaign total: 62 worker
+#          attempts, registry 3,557 -> 13,233 rows, frontier
+#          0.8679 -> 0.9604 (+0.093), four attributed RESOLVED flips.
+#          Crossing 0.96 needs crystal-lane source work: fitness
+#          shaping, seeding populations from the 0.94+ elite, or new
+#          material physics. The demand stands for that day.
 #
 # This is the KCB-1 research direction (close the delayed-identity gap =
 # longer-lived structure) expressed as scheduler demand. Noise-tolerance
