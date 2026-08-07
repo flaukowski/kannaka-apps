@@ -507,6 +507,10 @@ function runSchedule(appDir, manifest, dryRun) {
 const WORKER_MATERIALS = [
   "ideal_resonator", "metamaterial", "europium_crystal",
   "diamond_nv", "optical_cavity", "silicon",
+  // Wall-probe additions (2026-08-07): the only two built-in materials the
+  // grid had never tried — vacuum (zero damping, no reflection) and
+  // graphene_model (fastest c, weak reflection).
+  "vacuum", "graphene_model",
 ];
 
 // hdl-compatible class match: "Memory Seed" ≡ "MemorySeed".
@@ -553,7 +557,11 @@ function runWork(appDir, manifest, dryRun) {
   const generations = process.env.KHDL_WORK_GENERATIONS != null
     ? Number(process.env.KHDL_WORK_GENERATIONS)
     : manifest.run.generations ?? 10;
-  const population = manifest.run.population ?? 12;
+  // Population is the OTHER budget axis (generations scaling saturated at
+  // the ~0.91 persistence wall with pop fixed at 12) — override for probes.
+  const population = process.env.KHDL_WORK_POPULATION != null
+    ? Number(process.env.KHDL_WORK_POPULATION)
+    : manifest.run.population ?? 12;
 
   let state;
   try {
