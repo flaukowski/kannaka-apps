@@ -436,7 +436,17 @@ function runSchedule(appDir, manifest, dryRun) {
   let issued = 0;
   for (const entry of orderable.slice(0, maxOrders)) {
     const rec = state.requests[entry.key];
-    if (rec.order_id) continue; // one standing order per request
+    if (rec.order_id) {
+      // Ratchet support: a demand key can come BACK after its order was
+      // fulfilled (the floor rose past the supplied primitive — the
+      // living-demand pattern). A fulfilled order must not block reissue;
+      // archive the linkage and fall through to a fresh order. An OPEN
+      // order still means one-standing-order-per-request.
+      const existing = (state.orders || []).find((o) => o.order_id === rec.order_id);
+      if (existing && !existing.fulfilled_at) continue;
+      (rec.previous_orders = rec.previous_orders || []).push(rec.order_id);
+      delete rec.order_id;
+    }
     const orderId = `rs-${Date.now().toString(36)}-${issued}`;
     const order = {
       order_type: "crystal_work_order",

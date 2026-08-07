@@ -1,16 +1,20 @@
 # Standing demand: push the Standing Echo persistence frontier.
 #
-# The registry's best Standing Echo holds persistence 0.8679 (measured
-# 2026-08-07, 1153 rows). This program demands one at >= 0.87 — a floor
-# no existing primitive meets, sitting just past the all-time best, so
-# it stays unresolved until evolutionary search genuinely advances the
-# frontier. This is the KCB-1 research direction (close the delayed-
-# identity gap = longer-lived structure) expressed as scheduler demand.
-# Noise-tolerance floors are deliberately absent: the registry already
-# saturates noise_tolerance at 1.0, so only persistence is a frontier.
+# RATCHET LOG (the floor rises each time the swarm meets it — Nick's
+# living-demand pattern, ratified 2026-08-07):
+#   0.87 → RESOLVED 2026-08-07 by CRY-014468 (persistence 0.875, deep
+#          30-generation metamaterial shift, order rs-msibdssh-0) — beat
+#          the 0.8679 all-time record after 25 shallow attempts failed.
+#   0.88 → current target.
+#
+# This is the KCB-1 research direction (close the delayed-identity gap =
+# longer-lived structure) expressed as scheduler demand. Noise-tolerance
+# floors are deliberately absent: the registry saturates noise_tolerance
+# at 1.0, so persistence is the open frontier. Lesson encoded in the
+# worker: depth beats breadth here (KHDL_WORK_GENERATIONS=30).
 
 cell FrontierEcho() {
-    when always => base crystal.primitive "Standing Echo" min_persistence 0.87
+    when always => base crystal.primitive "Standing Echo" min_persistence 0.88
 }
 
 grow FrontierEcho()
