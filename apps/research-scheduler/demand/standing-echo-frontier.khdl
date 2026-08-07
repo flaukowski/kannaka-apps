@@ -5,7 +5,12 @@
 #   0.87 → RESOLVED 2026-08-07 by CRY-014468 (persistence 0.875, deep
 #          30-generation metamaterial shift, order rs-msibdssh-0) — beat
 #          the 0.8679 all-time record after 25 shallow attempts failed.
-#   0.88 → current target.
+#   0.88 → RESOLVED 2026-08-07 by CRY-015518 (persistence 0.887, noise
+#          tolerance 1.000 — a perfect-tolerance record row; order
+#          rs-msj5mz38-0, fell within the first deep 6x30 series).
+#   0.90 → current target. Deliberately a stretch (+0.013 over the
+#          record, larger than a typical deep-series gain of ~+0.010) —
+#          a wall that HOLDS is honest research state, not failure.
 #
 # This is the KCB-1 research direction (close the delayed-identity gap =
 # longer-lived structure) expressed as scheduler demand. Noise-tolerance
@@ -14,7 +19,7 @@
 # worker: depth beats breadth here (KHDL_WORK_GENERATIONS=30).
 
 cell FrontierEcho() {
-    when always => base crystal.primitive "Standing Echo" min_persistence 0.88
+    when always => base crystal.primitive "Standing Echo" min_persistence 0.90
 }
 
 grow FrontierEcho()
