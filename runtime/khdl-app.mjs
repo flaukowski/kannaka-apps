@@ -239,6 +239,41 @@ function statePath() {
     join(homedir(), ".kannaka", "research-scheduler.json");
 }
 
+// Swarm enqueue needs NATS credentials; crons source ~/.kannaka-nats.env for
+// the same reason (anonymous NATS publishes are silently dropped). Merge that
+// file into the child env when the shell doesn't already carry creds.
+function natsEnv() {
+  if (PINNED_ENV.NATS_USER) return PINNED_ENV;
+  try {
+    const env = { ...PINNED_ENV };
+    for (const line of readFileSync(join(homedir(), ".kannaka-nats.env"), "utf8").split(/\r?\n/)) {
+      const m = line.match(/^(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$/);
+      if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    }
+    return env;
+  } catch {
+    return PINNED_ENV;
+  }
+}
+
+// `kannaka swarm enqueue` is request-reply: it publishes the task, then waits
+// for a WORKER to answer. No crystal-work worker exists yet, so a reply
+// timeout after a successful publish still means the order is on the queue.
+function enqueueOrder(order) {
+  const r = spawnSync(
+    KAN,
+    ["swarm", "enqueue", "crystal_work_order", JSON.stringify(order), "--timeout", "5"],
+    { env: natsEnv(), encoding: "utf8" }
+  );
+  if (r.error) return { posted: false, why: r.error.message };
+  const out = (r.stdout ?? "") + (r.stderr ?? "");
+  if (r.status === 0) return { posted: true, why: "worker replied" };
+  if (out.includes("[enqueue] KANNAKA.work.")) {
+    return { posted: true, why: "published; no worker reply yet" };
+  }
+  return { posted: false, why: `exit ${r.status}: ${out.trim().split("\n").pop()}` };
+}
+
 function sweepPrograms(storeRoot, appDir, manifest) {
   const programs = [];
   const appsDir = join(storeRoot, "apps");
@@ -405,13 +440,14 @@ function runSchedule(appDir, manifest, dryRun) {
     };
     console.error(`research-scheduler: order ${orderId} → ${entry.domain}.${entry.class} (blocks ${entry.requesters.length} plan(s))`);
     if (!dryRun) {
-      const r = runCapture(KAN, ["swarm", "enqueue", "crystal_work_order", JSON.stringify(order)]);
-      if (r.code !== 0) {
-        console.error(`  enqueue failed (exit ${r.code}) — order recorded locally only`);
-        log(`schedule enqueue FAILED ${orderId} exit=${r.code}`);
-        order.enqueued = false;
+      const { posted, why } = enqueueOrder(order);
+      order.enqueued = posted;
+      order.enqueue_note = why;
+      if (!posted) {
+        console.error(`  enqueue failed (${why}) — order recorded locally only`);
+        log(`schedule enqueue FAILED ${orderId}: ${why}`);
       } else {
-        order.enqueued = true;
+        console.error(`  enqueued (${why})`);
       }
     } else {
       order.enqueued = false;
