@@ -537,7 +537,12 @@ function runWork(appDir, manifest, dryRun) {
   const attempts = process.env.KHDL_WORK_ATTEMPTS != null
     ? Number(process.env.KHDL_WORK_ATTEMPTS)
     : manifest.run.attempts ?? 8;
-  const generations = manifest.run.generations ?? 10;
+  // Deep-budget shifts: the 30-generation manual run outscored every
+  // 10-generation attempt (fitness 1.881 vs 1.66), so persistence-frontier
+  // orders sometimes warrant fewer, deeper attempts.
+  const generations = process.env.KHDL_WORK_GENERATIONS != null
+    ? Number(process.env.KHDL_WORK_GENERATIONS)
+    : manifest.run.generations ?? 10;
   const population = manifest.run.population ?? 12;
 
   let state;
