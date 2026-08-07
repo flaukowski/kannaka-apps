@@ -12,8 +12,15 @@
 #          tolerance 0.998; order rs-msj5zv2n-0, first deep 6x45 series).
 #          Deeper budgets yield bigger jumps: 30 gens ≈ +0.010, 45 gens
 #          ≈ +0.023.
-#   0.925 → current target (deep 6x60 series). The ratchet continues
-#          until a full series HOLDS — that wall is the finding.
+#   0.925 → STANDING (the wall, found 2026-08-07). A full deep 6x60
+#          series went 0/fulfilled; best it grew was CRY-017105 at
+#          0.9125 (+0.002). The budget scaling law COLLAPSED:
+#          30 gens ≈ +0.010, 45 gens ≈ +0.023, 60 gens ≈ +0.002 —
+#          evolutionary search saturates near persistence ~0.91.
+#          Meeting this floor likely needs a SEARCH-STRATEGY change
+#          (crystal lane: material physics, fitness shaping, seeding
+#          from the 0.91 elite), not more generations. The demand
+#          stands: that is what a research frontier is.
 #
 # This is the KCB-1 research direction (close the delayed-identity gap =
 # longer-lived structure) expressed as scheduler demand. Noise-tolerance
