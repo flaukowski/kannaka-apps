@@ -1,0 +1,12 @@
+[app]
+name = "provisioner"
+version = "0.1.0"
+description = "Genesis app — seed a node's required memory architecture, then prove it by gate"
+kind = "provision"
+
+[run]
+mode = "provision"
+seed = "seed.khdl"
+gate = "gate.khdl"
+seed_via = "cli"
+seed_importance = 0.85

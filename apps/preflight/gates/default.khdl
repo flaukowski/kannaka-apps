@@ -1,0 +1,48 @@
+# Preflight — memory integrity gate for a live Kannaka HRM.
+#
+# The fleet-proven anchor set (deployed 2026-08-06: local/O1/O3 PASS,
+# O2 witness FAIL with all anchors dark — a true positive). Floors sit
+# at 0.25, inside the measured discrimination band: genuine anchors
+# score 0.36–0.45 under the semantic encoder, gibberish ~0.15.
+#
+# Run via the store runner (which pins recall env):
+#   node runtime/khdl-app.mjs run apps/preflight
+#
+# A failure is a finding, not an error: the warnings name the anchor
+# that went dark. Run before .hrm migrations, encoder swaps, facet
+# backfills — any one-way operation.
+
+cell IntegrityGate() {
+    when always => split IdentityAnchors(), WorkAnchors()
+}
+
+cell IdentityAnchors() {
+    when always => split HomeAnchor(), SwarmAnchor()
+}
+
+cell WorkAnchors() {
+    when always => split CrystalAnchor(), RadioAnchor()
+}
+
+cell HomeAnchor() {
+    when always => base memory.memory "Kannaka Labs location Tech Hub OpenBotCity" min_noise_tolerance 0.25
+}
+
+cell SwarmAnchor() {
+    when always => base memory.memory "swarm NATS authentication kannaka nodes" min_noise_tolerance 0.25
+}
+
+cell CrystalAnchor() {
+    when always => base memory.memory "crystal evidence ladder CRY-012705 Level 3 perturbation survival" min_noise_tolerance 0.25
+}
+
+cell RadioAnchor() {
+    when always => base memory.memory "Ghost Signals podcast episode radio" min_noise_tolerance 0.25
+}
+
+grow IntegrityGate()
+
+expect unresolved_components == 0
+expect capacity >= 4
+expect couplings == 0
+expect noise_tolerance > 0.25

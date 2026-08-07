@@ -1,0 +1,43 @@
+# Provisioner gate program — same anchors and floors as seed.khdl,
+# plus the expect gates that turn resolution into a verdict. The
+# runner runs this before seeding (idempotence check) and after
+# (the app's exit code).
+
+cell NodeArchitecture() {
+    when always => split IdentityAnchors(), WorkAnchors(), StoreAnchor()
+}
+
+cell IdentityAnchors() {
+    when always => split HomeAnchor(), SwarmAnchor()
+}
+
+cell WorkAnchors() {
+    when always => split CrystalAnchor(), RadioAnchor()
+}
+
+cell HomeAnchor() {
+    when always => base memory.memory "Kannaka Labs location Tech Hub OpenBotCity" min_noise_tolerance 0.25
+}
+
+cell SwarmAnchor() {
+    when always => base memory.memory "swarm NATS authentication kannaka nodes" min_noise_tolerance 0.25
+}
+
+cell CrystalAnchor() {
+    when always => base memory.memory "crystal evidence ladder CRY-012705 Level 3 perturbation survival" min_noise_tolerance 0.25
+}
+
+cell RadioAnchor() {
+    when always => base memory.memory "Ghost Signals podcast episode radio" min_noise_tolerance 0.25
+}
+
+cell StoreAnchor() {
+    when always => base memory.memory "kannaka-apps application store khdl-app runner hosts preflight and provisioner apps" min_noise_tolerance 0.25
+}
+
+grow NodeArchitecture()
+
+expect unresolved_components == 0
+expect capacity >= 5
+expect couplings == 0
+expect noise_tolerance > 0.25

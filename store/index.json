@@ -1,0 +1,23 @@
+{
+  "schema": "kannaka-apps-index-v1",
+  "apps": [
+    {
+      "name": "preflight",
+      "version": "0.1.0",
+      "description": "Memory integrity gate — run before any one-way HRM operation",
+      "kind": "gate",
+      "path": "apps/preflight",
+      "source": "store",
+      "variants": []
+    },
+    {
+      "name": "provisioner",
+      "version": "0.1.0",
+      "description": "Genesis app — seed a node's required memory architecture, then prove it by gate",
+      "kind": "provision",
+      "path": "apps/provisioner",
+      "source": "store",
+      "variants": []
+    }
+  ]
+}

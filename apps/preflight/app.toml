@@ -1,0 +1,14 @@
+[app]
+name = "preflight"
+version = "0.1.0"
+description = "Memory integrity gate — run before any one-way HRM operation"
+kind = "gate"
+
+[run]
+mode = "gate"
+entry = "gates/default.khdl"
+
+[variants]
+# Role-specific gates land here as the fleet's roles get their own anchor
+# sets (e.g. witness = "gates/witness.khdl"). The default gate is the
+# fleet-proven 08-06 anchor set.

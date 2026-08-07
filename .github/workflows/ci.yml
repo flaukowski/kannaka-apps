@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check every script
+        run: |
+          for f in runtime/*.mjs scripts/*.mjs; do
+            node --check "$f"
+          done
+
+      - name: Store index is fresh
+        run: node scripts/build-index.mjs --check
+
+      - name: Fetch kannaka-hdl (latest release, musl static)
+        run: |
+          curl -fL -o kannaka-hdl \
+            https://github.com/flaukowski/kannaka-hdl/releases/latest/download/kannaka-hdl-linux-x86_64
+          chmod +x kannaka-hdl
+
+      - name: Parse-check every .khdl program
+        run: |
+          status=0
+          for f in apps/*/*.khdl apps/*/*/*.khdl; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            ./kannaka-hdl check "$f" || status=1
+          done
+          exit $status

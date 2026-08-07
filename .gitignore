@@ -1,0 +1,4 @@
+node_modules/
+*.log
+kannaka-hdl
+kannaka-hdl.exe
