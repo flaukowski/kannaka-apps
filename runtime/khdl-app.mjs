@@ -367,7 +367,12 @@ function runSchedule(appDir, manifest, dryRun) {
     const { grewClean, requests } = harvestDemand(p);
     if (grewClean) cleanPrograms.add(p.app + ":" + p.file);
     for (const req of requests) {
-      const key = `${req.domain}|${req.class}`;
+      // Evidence/capability floors change the KIND of supply work
+      // (promotion, not evolve), so they are part of demand identity —
+      // a validated-capability ask must never merge with a raw metric
+      // frontier for the same class. Scalar floors still merge by max.
+      const key = `${req.domain}|${req.class}` +
+        `|e${req.constraints.min_evidence || 0}|c${req.constraints.capability || ""}`;
       const entry = backlog.get(key) || {
         key, domain: req.domain, class: req.class,
         component_type: req.component_type,
@@ -377,6 +382,8 @@ function runSchedule(appDir, manifest, dryRun) {
       entry.requesters.push({ app: p.app, file: p.file, plan_hash: req.plan_hash });
       entry.constraints.min_persistence = Math.max(entry.constraints.min_persistence, req.constraints.min_persistence || 0);
       entry.constraints.min_noise_tolerance = Math.max(entry.constraints.min_noise_tolerance, req.constraints.min_noise_tolerance || 0);
+      entry.constraints.min_evidence = req.constraints.min_evidence || 0;
+      entry.constraints.capability = req.constraints.capability || null;
       entry.constraints.material = entry.constraints.material || req.constraints.material;
       backlog.set(key, entry);
     }
@@ -395,6 +402,14 @@ function runSchedule(appDir, manifest, dryRun) {
     state = JSON.parse(readFileSync(statePath(), "utf8"));
   } catch {
     // first run
+  }
+  // Migrate pre-v0.9 request keys (domain|class) to the constraint-aware
+  // format — both legacy orders were plain-floor demand, i.e. |e0|c.
+  for (const key of Object.keys(state.requests)) {
+    if (!key.includes("|e")) {
+      state.requests[`${key}|e0|c`] = state.requests[key];
+      delete state.requests[key];
+    }
   }
   const now = new Date().toISOString();
 
@@ -508,13 +523,20 @@ function qualifyingRows(order) {
   return rows.filter((p) =>
     normClass(p.class) === want &&
     (p.persistence || 0) >= (c.min_persistence || 0) &&
-    (p.noise_tolerance || 0) >= (c.min_noise_tolerance || 0)
+    (p.noise_tolerance || 0) >= (c.min_noise_tolerance || 0) &&
+    // hdl v0.9 floors: absent evidence_level = 1 Observed (crystal
+    // v0.10); capability satisfied by PASSED records only (v0.11).
+    (p.evidence_level ?? 1) >= (c.min_evidence || 0) &&
+    (!c.capability ||
+      (p.behavioral_capabilities || []).some((r) => r.passed && r.name === c.capability))
   );
 }
 
 function runWork(appDir, manifest, dryRun) {
   const crystal = process.env.KANNAKA_CRYSTAL_BIN || "kannaka-crystal";
-  const attempts = manifest.run.attempts ?? 8;
+  const attempts = process.env.KHDL_WORK_ATTEMPTS != null
+    ? Number(process.env.KHDL_WORK_ATTEMPTS)
+    : manifest.run.attempts ?? 8;
   const generations = manifest.run.generations ?? 10;
   const population = manifest.run.population ?? 12;
 
@@ -557,6 +579,56 @@ function runWork(appDir, manifest, dryRun) {
     if (rows.length > 0) stamp(order, rows[0], "satisfied before shift (out-of-band supply)");
   }
 
+  // Capability orders (hdl v0.9) are PROMOTION work, not evolve work: the
+  // class already exists — what's missing is validation. Supply path per
+  // crystal ADR-0004: promote --procedure replicate (L2; a failed
+  // replicate honestly DEMOTES the row), then promote --procedure
+  // behavior --capability <name>. Candidates are the strongest same-class
+  // rows; only post-v0.8 rows carry the experiment manifest promotion
+  // needs, so failures on old rows are expected and cheap.
+  for (const order of stillOpen().filter((o) => o.constraints?.capability)) {
+    const cap = order.constraints.capability;
+    let rows = [];
+    try {
+      const j = JSON.parse(readFileSync(crystalRegistryPath(), "utf8"));
+      rows = (j.primitives || j)
+        .filter((p) => normClass(p.class) === normClass(order.class))
+        // Promotion replays the genome from the experiment manifest;
+        // pre-ADR-0004 rows have none and crystal refuses them outright
+        // ("regenerate it through a manifested run") — measured: the
+        // all-time record holders are all unpromotable for this reason.
+        .filter((p) => p.experiment_id)
+        .sort((a, b) => (b.persistence || 0) - (a.persistence || 0))
+        .slice(0, manifest.run.promotion_candidates ?? 4);
+    } catch {
+      // registry unreadable — fall through to the evolve shift
+    }
+    order.promotion_log = order.promotion_log || [];
+    for (const row of rows) {
+      console.error(`  ${order.order_id}: promotion candidate ${row.id} (persistence ${(row.persistence || 0).toFixed(3)}, L${row.evidence_level ?? 1})`);
+      if (dryRun) continue;
+      const steps = [];
+      if ((row.evidence_level ?? 1) < 2) {
+        steps.push(["promote", row.id, "--procedure", "replicate"]);
+      }
+      steps.push(["promote", row.id, "--procedure", "behavior", "--capability", cap]);
+      let failed = false;
+      for (const args of steps) {
+        const r = runCapture(crystal, args);
+        const line = (r.stdout + r.stderr).trim().split("\n").pop();
+        order.promotion_log.push({ id: row.id, args: args.join(" "), exit: r.code, note: line, at: new Date().toISOString() });
+        console.error(`    ${args[3]}${args[5] ? " " + args[5] : ""}: exit ${r.code} — ${line}`);
+        if (r.code !== 0) { failed = true; break; }
+      }
+      if (failed) continue;
+      const hits = qualifyingRows(order);
+      if (hits.length > 0) {
+        stamp(order, hits.find((h) => h.id === row.id) || hits[0], "promotion shift");
+        break;
+      }
+    }
+  }
+
   // Data-driven material bias: the registry's own record-holders say which
   // material produces the metric an order is starved for. For each open
   // order, find the material of the best same-class rows; odd attempts use
@@ -585,9 +657,16 @@ function runWork(appDir, manifest, dryRun) {
   const biases = [...new Set(stillOpen().map(biasFor).filter(Boolean))];
   if (biases.length) console.error(`  registry bias: record-holders favour ${biases.join(", ")}`);
 
+  // Evolve only helps demand that raw discovery can satisfy: fresh rows
+  // register at L1 with no capability records, so orders floored on
+  // evidence ≥ 2 or a capability are promotion work (above), never
+  // evolve work.
+  const evolvable = () => stillOpen().filter(
+    (o) => !o.constraints?.capability && (o.constraints?.min_evidence || 0) <= 1
+  );
   state.shift_attempts = state.shift_attempts || 0;
   state.shift_log = state.shift_log || [];
-  for (let i = 0; i < attempts && stillOpen().length > 0; i++) {
+  for (let i = 0; i < attempts && evolvable().length > 0; i++) {
     const n = state.shift_attempts;
     const rotation = WORKER_MATERIALS[n % WORKER_MATERIALS.length];
     const material = (n % 2 === 1 && biases.length)
@@ -604,7 +683,7 @@ function runWork(appDir, manifest, dryRun) {
     ];
     console.error(
       `  attempt ${n + 1}: ${material} seed=${seed}${robust ? " robust" : ""} ` +
-      `(${stillOpen().length} order(s) open)`
+      `(${evolvable().length} evolvable order(s) open)`
     );
     if (dryRun) { state.shift_attempts++; continue; }
 

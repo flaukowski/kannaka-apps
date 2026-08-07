@@ -1,0 +1,17 @@
+# Standing demand: a VALIDATED noise-shielded echo (hdl v0.9 floors).
+#
+# `capability "noise_shielding"` matches only rows holding a PASSED
+# behavioral contract (crystal v0.11); `min_evidence 2` requires at
+# least Replicated on the evidence ladder (v0.10). No registry row
+# satisfies both today — zero passed noise_shielding records exist —
+# so this stays unresolved until real validation work happens. Supply
+# path (crystal-worker promotion shift): promote --procedure replicate
+# (L2), then promote --procedure behavior --capability noise_shielding.
+# KCB-1 measured distractor suppression as the medium's actual edge, so
+# this is the contract the substrate is most likely to genuinely pass.
+
+cell ShieldedCore() {
+    when always => base crystal.primitive "Standing Echo" capability "noise_shielding" min_evidence 2
+}
+
+grow ShieldedCore()
